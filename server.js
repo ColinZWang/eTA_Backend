@@ -138,7 +138,7 @@ app.post('/api/discussions', async (req, res) => {
           replyTime: new Date().toLocaleString(),
           comments: [{
               user: 'ETA',
-              avatarUrl: 'http://localhost:3000/ETA.png',
+              avatarUrl: 'https://eta-chatbot.vercel.app/ETA.png',
               content: '', 
               YTEmbedLink: '',
               YT_time: '',
