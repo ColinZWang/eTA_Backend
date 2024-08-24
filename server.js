@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
-
+const bcrypt = require('bcrypt');
 
 require('dotenv').config();
 
@@ -12,8 +12,8 @@ const PORT = process.env.PORT || 3800;
 app.use(cors());
 app.use(express.json()); // middleware to parse JSON
 
-const password = '770sGrandAve7058';
-const MONGODB_URI = `mongodb+srv://ColinZWang:${password}@colinzwang-cluster.6civtdf.mongodb.net/?retryWrites=true&w=majority`;
+// Use the environment variable for MongoDB URI
+const MONGODB_URI = process.env.MONGODB_URI;
 
 console.log("Attempting to connect to MongoDB...");
 
@@ -27,19 +27,9 @@ mongoose.connect(MONGODB_URI, {
   }
 });
 
-const fetchAndLogDiscussions = async () => {
-    try {
-      const discussions = await Discussion.find(); // fetch all discussions
-      console.log("Example Discussion in the Database:");
-      console.log(discussions[0]);
-    } catch (error) {
-      console.log("Error fetching discussions:", error);
-    }
-  };
   
   mongoose.connection.once('open', function() {
     console.log("Successfully connected to MongoDB.", "\n");
-    fetchAndLogDiscussions(); // fetch and log discussions once database connection is open
   }).on('error', function(error) {
     console.log("Connection error:", error);
   });
@@ -87,6 +77,7 @@ const User = mongoose.model('User', userSchema);
 app.get('/api/discussions', async (req, res) => {
     try {
         const discussions = await Discussion.find().sort({ createdAt: -1 }); // sort by creation time
+        console.log(`Fetched ${discussions.length} discussions successfully.`);
         res.json(discussions.map(discussion => ({
         id: discussion._id.toString(), // convert ObjectId to string
         ...discussion.toObject(),
@@ -107,6 +98,7 @@ app.get('/api/discussions', async (req, res) => {
         if (!discussion) {
             return res.status(404).json({ message: 'Discussion not found' });
         }
+        console.log(`Fetched discussion with id ${req.params.id} successfully.`);
         res.json({
             id: discussion._id.toString(),
             ...discussion.toObject()
@@ -119,13 +111,14 @@ app.get('/api/discussions', async (req, res) => {
 // Function to call the AI API and get the response
 async function getAIResponse(userInput) {
   try {
-      const response = await axios.post('https://rag-app-001-1d4e6f4c631a.herokuapp.com/query/', {
+      const response = await axios.post(process.env.RAG_API_URL, {
           query: userInput
       }, {
           headers: {
               'Content-Type': 'application/json'
           }
       });
+      console.log('AI response received successfully.');
       return response.data;
   } catch (error) {
       console.error('Failed to get AI response:', error);
@@ -157,6 +150,7 @@ app.post('/api/discussions', async (req, res) => {
       });
 
       const savedDiscussion = await newDiscussion.save();
+      console.log('New discussion created successfully:', savedDiscussion._id);
       res.status(201).json(savedDiscussion);
 
       // Async call to get AI response from the API
@@ -173,6 +167,7 @@ app.post('/api/discussions', async (req, res) => {
                   "comments.0.pageno": aiResponse.sources.find(source => !source.document.includes('ytvid'))?.page || '',
               }
           });
+          console.log('Discussion updated with AI response successfully:', savedDiscussion._id);
       } catch (error) {
           console.error('Failed to get AI response:', error);
       }
@@ -186,13 +181,16 @@ app.post('/api/discussions', async (req, res) => {
   app.post('/api/register', async (req, res) => {
       try {
           const { username, password, isTA, verificationCode } = req.body;
-          if (isTA && verificationCode !== 'FightOn') {
+          if (isTA && verificationCode !== process.env.TA_VERIFICATION_CODE) {
             return res.status(400).json({ message: "Invalid verification code for TA." });
           }
-          const user = new User({ username, password, isTA, verificationCode });
+          const hashedPassword = await bcrypt.hash(password,10);
+          const user = new User({ username, password: hashedPassword, isTA, verificationCode });
           await user.save();
+          console.log('New user registered successfully:', user._id);
           res.status(201).json({ message: 'User created successfully', userId: user._id });
       } catch (error) {
+          console.error('Error creating user:', error.message);
           res.status(400).json({ message: 'Error creating user', error: error.message });
       }
   });
@@ -203,12 +201,15 @@ app.post('/api/discussions', async (req, res) => {
       // Find user in the database
       const user = await User.findOne({ username });
       if (!user) {
+          console.log(`Login attempt failed: User ${username} not found.`);
           return res.status(404).json({ message: 'User not found' });
       }
-      // Example password verification - replace with actual check!
-      if (password !== user.password) {
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+          console.log(`Login attempt failed: Incorrect password for user ${username}.`);
           return res.status(401).json({ message: 'Incorrect password' });
       }
+      console.log(`User ${username} logged in successfully.`);
       // Send back user data, omitting sensitive info like password
       res.json({
           user: {
@@ -224,8 +225,10 @@ app.post('/api/discussions', async (req, res) => {
     try {
       const { isVerified } = req.body;
       const discussion = await Discussion.findByIdAndUpdate(req.params.id, { isVerified }, { new: true });
+      console.log(`Discussion ${req.params.id} verified successfully.`);
       res.json(discussion);
     } catch (error) {
+      console.error(`Failed to verify discussion ${req.params.id}:`, error);
       res.status(500).send("Failed to verify discussion");
     }
   });  
